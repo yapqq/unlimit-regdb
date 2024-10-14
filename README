@@ -1,2 +1,12 @@
-Patched regulatory database without any limits and restrictions.
-Use only for testing purposes!
+# Regulatory Database Patch
+
+This patch provides a actual regulatory database without any imposed limits or restrictions, including:
+  - DFS (Dynamic Frequency Selection)
+  - IR (Indoor Requirement)
+  - Power limits
+
+> **Note**: This is intended for testing purposes only!
+
+## Additional Information
+
+- **Region 00**: All channels are enabled for this region.
