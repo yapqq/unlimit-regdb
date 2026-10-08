@@ -1,0 +1,103 @@
+name: Release
+
+on:
+  schedule:
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Upstream tag to build (empty = latest)
+        required: false
+      force:
+        description: Rebuild even if the release already exists
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      UPSTREAM: https://git.kernel.org/pub/scm/linux/kernel/git/wens/wireless-regdb.git
+      MIRROR: https://kernel.googlesource.com/pub/scm/linux/kernel/git/wens/wireless-regdb
+      REGDB_AUTHOR: manager
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Find upstream tag
+        id: up
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          tag="$INPUT_TAG"
+          [ -n "$tag" ] || tag=$(git ls-remote --tags --refs "$UPSTREAM" 'master-*' | sed 's|.*refs/tags/||' | sort -V | tail -n1)
+          [ -n "$tag" ] || { echo "no upstream tag found" >&2; exit 1; }
+          echo "upstream tag: $tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if gh release view "$tag" >/dev/null 2>&1 && [ "$FORCE" != "true" ]; then
+            echo "release $tag already exists, nothing to do"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download upstream db.txt
+        if: steps.up.outputs.build == 'true'
+        env:
+          TAG: ${{ steps.up.outputs.tag }}
+        run: |
+          curl -fsSL --retry 3 -o db.txt "$UPSTREAM/plain/db.txt?h=$TAG" ||
+            curl -fsSL --retry 3 "$MIRROR/+/refs/tags/$TAG/db.txt?format=TEXT" | base64 -d > db.txt
+          test -s db.txt
+          grep -q '^country 00:' db.txt
+
+      - name: Install dependencies
+        if: steps.up.outputs.build == 'true'
+        run: sudo apt-get update && sudo apt-get install -y python3-m2crypto
+
+      - name: Signing key
+        if: steps.up.outputs.build == 'true'
+        env:
+          KEY: ${{ secrets.REGDB_PRIVKEY }}
+        run: |
+          if [ -n "$KEY" ]; then
+            (umask 077; printf '%s\n' "$KEY" > "$HOME/.wireless-regdb-$REGDB_AUTHOR.key.priv.pem")
+          else
+            echo "::warning::REGDB_PRIVKEY secret is not set, a throw-away signing key will be generated"
+          fi
+
+      - name: Patch and build
+        if: steps.up.outputs.build == 'true'
+        run: bash run.sh
+
+      - name: Pack
+        if: steps.up.outputs.build == 'true'
+        run: zip -j unlimited-regdb.zip regulatory.db regulatory.db.p7s
+
+      - name: Commit
+        if: steps.up.outputs.build == 'true'
+        env:
+          TAG: ${{ steps.up.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add db.txt sha1sum.txt regulatory.bin regulatory.db regulatory.db.p7s \
+            "$REGDB_AUTHOR.key.pub.pem" "$REGDB_AUTHOR.x509.pem" .custom
+          git commit -m "Update to ${TAG#master-}" || echo "nothing to commit"
+          git push
+
+      - name: Release
+        if: steps.up.outputs.build == 'true'
+        env:
+          TAG: ${{ steps.up.outputs.tag }}
+        run: |
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG" \
+            --target "$(git rev-parse HEAD)" \
+            --title "${TAG#master-}" \
+            --notes "Unlimited regdb built from upstream wireless-regdb $TAG." \
+            regulatory.db regulatory.db.p7s regulatory.bin unlimited-regdb.zip

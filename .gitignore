@@ -1,2 +1,7 @@
 key.priv.pem
 dbparse.pyc
+.idea
+.venv
+db.txt.orig
+__pycache__/
+myenv/
