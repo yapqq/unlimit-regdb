@@ -25,7 +25,7 @@ jobs:
       MIRROR: https://kernel.googlesource.com/pub/scm/linux/kernel/git/wens/wireless-regdb
       REGDB_AUTHOR: manager
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Find upstream tag
         id: up
@@ -74,10 +74,6 @@ jobs:
         if: steps.up.outputs.build == 'true'
         run: bash run.sh
 
-      - name: Pack
-        if: steps.up.outputs.build == 'true'
-        run: zip -j unlimited-regdb.zip regulatory.db regulatory.db.p7s
-
       - name: Commit
         if: steps.up.outputs.build == 'true'
         env:
@@ -100,4 +96,4 @@ jobs:
             --target "$(git rev-parse HEAD)" \
             --title "${TAG#master-}" \
             --notes "Unlimited regdb built from upstream wireless-regdb $TAG." \
-            regulatory.db regulatory.db.p7s regulatory.bin unlimited-regdb.zip
+            regulatory.db regulatory.db.p7s regulatory.bin
